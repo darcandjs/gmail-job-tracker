@@ -1,2 +1,90 @@
-// Gmail Job Tracker v10.7 Script
-// Contents removed for brevity — paste your latest working Apps Script here.
+/**
+ * Gmail Job Tracker + Airtable Sync
+ * Version: v10.7
+ * Created by: Your Bestie ChatGPT 💜
+ */
+
+const AIRTABLE_API_KEY = 'pati7JS1GDy4dOsRQ.08477a62d8212ba7254827a94ffc73627f6918473864911cdf47fd480759afe2';
+const AIRTABLE_BASE_ID = 'appiiW6tpeFrCsy0E';
+const AIRTABLE_TABLE_NAME = 'Job Tracker';
+
+// ===== Helper Functions =====
+function extractCompanyName(from, subject, snippet) {
+  const knownDomains = [
+    { keyword: 'ashbyhq', pattern: /thank you for applying to\s+(.*?)[.!]/i },
+    { keyword: 'echo', pattern: /thank you for applying to\s+(.*?)[.!]/i },
+    { keyword: 'paycomonline', pattern: /Password setup for\s+(.*?)\s*account/i },
+    { keyword: 'workday', pattern: /employment at\s+(.*?)[.!]/i },
+    { keyword: 'jobhire.tech', pattern: /thank you for applying to\s+(.*?)[.!]/i }
+  ];
+  const lowerFrom = from.toLowerCase();
+  for (const domain of knownDomains) {
+    if (lowerFrom.includes(domain.keyword)) {
+      const match = snippet.match(domain.pattern) || subject.match(domain.pattern);
+      if (match) return cleanCompanyName(match[1]);
+    }
+  }
+  const emailMatch = from.match(/@([\w.-]+)/);
+  if (emailMatch) {
+    const domainParts = emailMatch[1].split('.');
+    return cleanCompanyName(domainParts.includes("workday") ? domainParts[domainParts.length - 2] : domainParts[0]);
+  }
+  return "Unknown";
+}
+
+function extractJobTitle(subject, snippet) {
+  const titleMatch = subject.match(/for\s+(.*)/i) || snippet.match(/for the position of\s+(.*?)[.\n]/i);
+  return titleMatch ? titleMatch[1].split(/ at | with /)[0].trim() : "";
+}
+
+function detectStatus(text) {
+  if (text.includes("interview") || text.includes("scheduled") || text.includes("calendar invite")) return "Interview";
+  if (text.includes("not selected") || text.includes("unfortunately") || text.includes("another candidate")) return "Rejected";
+  if (text.includes("complete your application") || text.includes("survey") || text.includes("eeo") || text.includes("password")) return "Requesting Info";
+  return "Submitted";
+}
+
+function cleanCompanyName(name) {
+  return name.replace(/[^a-zA-Z0-9 &\-]/g, "").trim();
+}
+
+// ===== Gmail Job Tracker =====
+function getJobApplications() {
+  const threads = GmailApp.search('newer_than:14d (subject:"thank you for applying" OR from:(robot@jobhire.tech OR msg.paycomonline.com OR workday OR ashbyhq OR echo OR notifications@jobvite.com))');
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Job Tracker") || SpreadsheetApp.getActiveSpreadsheet().insertSheet("Job Tracker");
+  const headers = ["Date", "From", "Subject", "Company", "Job Title", "Status", "Snippet", "Autobot", "Account", "Email Link", "Airtable Record ID"];
+  const data = [];
+  const seen = new Set();
+
+  if (sheet.getLastRow() === 0) sheet.appendRow(headers);
+
+  threads.forEach(thread => {
+    const messages = thread.getMessages();
+    messages.forEach(message => {
+      const id = message.getId();
+      if (seen.has(id)) return;
+      const date = message.getDate();
+      const from = message.getFrom();
+      const subject = message.getSubject();
+      const snippet = message.getPlainBody().slice(0, 240).replace(/\s+/g, ' ').trim();
+      const lowerSnippet = snippet.toLowerCase();
+      let company = extractCompanyName(from, subject, snippet);
+      let title = extractJobTitle(subject, snippet);
+      let status = detectStatus(lowerSnippet);
+      const account = from.includes("darcand") ? "darcand" : "darcandjs";
+      const autobot = from.includes("robot@jobhire.tech") ? "Yes" : "No";
+      let emailLink = "";
+      if (["Interview", "Requesting Info"].includes(status)) {
+        emailLink = `https://mail.google.com/mail/u/0/#inbox/${id}`;
+      }
+      data.push([date, from, subject, company, title, status, snippet, autobot, account, emailLink, ""]);
+      seen.add(id);
+    });
+  });
+
+  if (data.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, data.length, headers.length).setValues(data);
+  }
+
+  Logger.log("✅ Gmail applications pulled successfully.");
+}
