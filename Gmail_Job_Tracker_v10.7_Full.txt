@@ -88,3 +88,36 @@ function getJobApplications() {
 
   Logger.log("✅ Gmail applications pulled successfully.");
 }
+
+function deleteAllAirtableRecords() {
+  const AIRTABLE_API_KEY = 'pati7JS1GDy4dOsRQ.08477a62d8212ba7254827a94ffc73627f6918473864911cdf47fd480759afe2';
+  const AIRTABLE_BASE_ID = 'appiiW6tpeFrCsy0E';
+  const AIRTABLE_TABLE_NAME = 'Job Tracker';
+
+  const url = `https://api.airtable.com/v0/${AIRTABLE_BASE_ID}/${encodeURIComponent(AIRTABLE_TABLE_NAME)}`;
+  const headers = {
+    Authorization: `Bearer ${AIRTABLE_API_KEY}`,
+  };
+
+  const response = UrlFetchApp.fetch(url, { headers });
+  const records = JSON.parse(response.getContentText()).records;
+
+  records.forEach(record => {
+    const deleteUrl = `${url}/${record.id}`;
+    UrlFetchApp.fetch(deleteUrl, {
+      method: "delete",
+      headers
+    });
+  });
+
+  Logger.log(`✅ Deleted ${records.length} records from Airtable.`);
+}
+
+function play1() {
+  deleteAllAirtableRecords();
+  Utilities.sleep(3000);
+  deleteAllAirtableRecords();
+  Utilities.sleep(3000);
+  deleteAllAirtableRecords();
+  Utilities.sleep(3000);
+}
