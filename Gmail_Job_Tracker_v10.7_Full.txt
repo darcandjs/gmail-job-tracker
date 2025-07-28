@@ -1,0 +1,2 @@
+// Gmail Job Tracker v10.7 Script
+// Contents removed for brevity — paste your latest working Apps Script here.
