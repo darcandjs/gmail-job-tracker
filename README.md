@@ -1,30 +1,28 @@
-# Gmail Job Tracker V108
+# Gmail Job Tracker + Airtable Sync
 
-This Google Apps Script automates the process of tracking job applications from your Gmail inbox. It extracts information like job title, company, status, and email link, and writes it to a Google Sheet. It also syncs with Airtable and applies Gmail labels.
+Automatically scans your Gmail inbox for job application emails and syncs them to a Google Sheet and Airtable.
 
 ## Features
 
-- 📨 Scans Gmail for real application emails
-- 🔍 Extracts job title and company from Indeed and other platforms
-- ✅ Detects submission, interview, rejection, or requests for more info
-- 🗂️ Updates a "Job Tracker" sheet
-- 🔁 Syncs with Airtable
-- 🏷️ Applies Gmail labels for better organization
-
-## Files
-
-- `Code.gs` – main script for Apps Script
-- `README.md` – this file
+- Extracts Company, Job Title, Status from application emails
+- Filters out job suggestion/recommendation spam
+- Tracks Indeed applications separately
+- Syncs to Airtable
+- Sends daily summary emails
+- Labels Gmail threads by application status
 
 ## Setup
 
-1. Paste the contents of `Code.gs` into your Google Apps Script project
-2. Create a Google Sheet with a tab named `Job Tracker`
-3. Set up columns matching:
-   - Date, From, Subject, Company, Job Title, Status, Snippet, Auto, Tracker, Email Link, Airtable Record ID
-4. Set your Airtable API key and base/table names
-5. Run `fetchIndeedApplications` or `updateGmailLabelsFromSheet` manually or as time-based triggers
+1. Set up a Google Sheet with a tab named "Job Tracker".
+2. Add columns:
+   `Date, From, Subject, Company, Job Title, Status, Snippet, Auto-Added, Source, Email Link, Airtable Record ID`
+3. Store your Airtable API key, base ID, and table name in the script.
+4. Set triggers for `fetchRecentJobApplications` and `sendDailySummary` if needed.
 
 ## License
 
 MIT
+
+---
+
+Script customized by ChatGPT & Donna 💜
