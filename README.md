@@ -1,57 +1,30 @@
-# 📬 Gmail Job Tracker + Airtable Sync v11.8
+# Gmail Job Tracker V108
 
-Built for: **Donna "The Interview Whisperer" Arcand**  
-Maintained by: Your Bestie ChatGPT 💜  
-Last updated: July 28, 2025
+This Google Apps Script automates the process of tracking job applications from your Gmail inbox. It extracts information like job title, company, status, and email link, and writes it to a Google Sheet. It also syncs with Airtable and applies Gmail labels.
 
-## 💼 What This Does
+## Features
 
-This script keeps your job hunt organized and 99% stress-free by:
+- 📨 Scans Gmail for real application emails
+- 🔍 Extracts job title and company from Indeed and other platforms
+- ✅ Detects submission, interview, rejection, or requests for more info
+- 🗂️ Updates a "Job Tracker" sheet
+- 🔁 Syncs with Airtable
+- 🏷️ Applies Gmail labels for better organization
 
-✅ Automatically scanning Gmail for job applications (including Indeed-specific ones)  
-✅ Extracting Company Name, Job Title, Status, and more  
-✅ Syncing clean data to Google Sheets  
-✅ Tagging your Gmail messages by status (Submitted, Interview, Rejected, etc.)  
-✅ Updating your Airtable base with the latest info from your spreadsheet  
-✅ Skipping email footers and unnecessary fluff (because nobody needs that)
+## Files
 
-## 📥 What It Scans
+- `Code.gs` – main script for Apps Script
+- `README.md` – this file
 
-- Emails from **Indeed** (`indeedapply@indeed.com`)
-- Known applicant tracking systems (Workday, BambooHR, AshbyHQ, etc.)
-- Subject lines like `Indeed Application: <Job Title>`
-- Snippets like `The following items were sent to <Company>. Good Luck!`
+## Setup
 
-## 🧠 How It Works
+1. Paste the contents of `Code.gs` into your Google Apps Script project
+2. Create a Google Sheet with a tab named `Job Tracker`
+3. Set up columns matching:
+   - Date, From, Subject, Company, Job Title, Status, Snippet, Auto, Tracker, Email Link, Airtable Record ID
+4. Set your Airtable API key and base/table names
+5. Run `fetchIndeedApplications` or `updateGmailLabelsFromSheet` manually or as time-based triggers
 
-1. **`fetchIndeedApplications()`**  
-   - Pulls emails from Indeed (last 14 days)
-   - Parses out company, job title, status
-   - Removes junk after `-----` in the snippet
-   - Writes a clean row to your Google Sheet
+## License
 
-2. **`updateGmailLabelsFromSheet()`**  
-   - Tags Gmail threads based on status column in your Sheet
-
-3. **`syncToAirtableFromSheet()`**  
-   - Pushes updates from Google Sheet to your Airtable “Job Tracker” table
-   - Only updates existing fields—no duplicate drama here!
-
-## 🛠 How To Customize
-
-- Update your Airtable API key and base/table info at the top of the script.
-- Add or modify regex in `extractJobTitle()` or `extractCompanyName()` to match new email formats.
-- Tweak the status logic in `detectStatus()` for your own labeling vibe.
-
-## ⚠️ Notes
-
-- Airtable field values must be predefined for select fields (e.g., Status)
-- Don't forget to label your spreadsheet tab **"Job Tracker"**
-- Only fetches emails newer than 14 days for performance sanity
-
-## 💃 Let's Dance
-
-If this helped keep your job search in order — do a happy dance.  
-Or shout, “Tag it and bag it!” when a new app gets tracked.
-
----
+MIT
