@@ -25,23 +25,13 @@ function clearSheetDataOnly(sheetName) {
 
 // --- Utility: Clean Company Name ---
 function cleanCompanyName(name) {
-  if (!name || typeof name !== "string") return "???";
+  if (!name || typeof name !== "string") return "???";   // ✅ guard
 
-  // Remove any bracketed junk like [reply to email...]
   name = name.replace(/\[.*?\]/g, "");
-
-  // Allow common punctuation & clean noise
-  name = name
-    .replace(/[^a-zA-Z0-9 &.,\-]/g, "") // keep &, ., -, and commas
-    .replace(/\s+/g, " ")               // normalize whitespace
-    .trim();
-
-  // Fix camelCase to Camel Case
+  name = name.replace(/[^a-zA-Z0-9 &.,\-]/g, "").replace(/\s+/g, " ").trim();
   name = name.replace(/([a-z])([A-Z])/g, "$1 $2");
-
   return name;
 }
-
 
 
 
@@ -84,6 +74,36 @@ function getFirstMessageFromThread(threadId) {
       
   return null; 
 }  
+
+function getStatusFromText(text) {
+  const t = (text || "").toLowerCase();
+
+  // Rejected
+  if (t.includes("unfortunately") || t.includes("move forward with other")) return "Rejected";
+
+  // Interview
+  if (t.includes("interview") || t.includes("next step") || t.includes("schedule")) return "Interview";
+
+  // To Do
+  if (
+    t.includes("self identification") ||
+    t.includes("eeo form") ||
+    t.includes("complete your application") ||
+    t.includes("action needed") ||
+    t.includes("assigned to your file") ||
+    t.includes("candidate zone")
+  ) return "To Do";
+
+  // Submitted (default)
+  if (t.includes("thank you for applying") || t.includes("we have received your application")) return "Submitted";
+
+  return "Submitted";
+}
+
+// Backward-compatible alias
+function getStatusFromSnippet(s) {
+  return getStatusFromText(s);
+}
 
 // Ensure this helper exists or is imported
 function getStatusFromSnippet(snippet) {
@@ -154,15 +174,27 @@ function getRecentLabeledThreads(labelName, daysBack) {
 }
 
 function extractMessageDetails(thread) {
-  const msg = thread.getMessages()[0];
-  return {
-    firstMsg: msg,
-    from: msg.getFrom(),
-    subject: msg.getSubject(),
-    snippet: msg.getPlainBody().slice(0, 300),
-    threadUrl: `https://mail.google.com/mail/u/0/#inbox/${thread.getId()}`
-  };
+  const firstMsg = thread.getMessages()[0];
+  const from = firstMsg.getFrom();
+  const subject = firstMsg.getSubject();
+  const threadUrl = `https://mail.google.com/mail/u/0/#inbox/${thread.getId()}`;
+
+  const rawBody = firstMsg.getBody();       // HTML body
+  const body = cleanEmailBody(rawBody);     // to text, truncated
+
+  return { firstMsg, from, subject, body, threadUrl };
 }
+
+function cleanEmailBody(html) {
+  return (html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<[^>]+>/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 2000);
+}
+
 
 function isSpammySource(from) {
   const lowered = from.toLowerCase();
@@ -252,7 +284,160 @@ function writeLogToDrive(logContent, filename = "JobTracker_Log.txt") {
   Logger.log(`📝 Log saved to Drive: ${file.getUrl()}`);
 }
 
+// =========================
+// Status Detection Utilities
+// =========================
 
+// Optional: flip to true while debugging to see which rule hit
+var LOG_STATUS_DEBUG = false;
+
+function getStatusFromText(text) {
+  const t = (text || "").toLowerCase();
+
+  // --- 1) REJECTED (check first; most definitive) ---
+  const REJECT_TERMS = [
+    "unfortunately", "regret to inform", "we regret to inform",
+    "we will not be moving forward", "we're not moving forward",
+    "not moving forward", "we won't be proceeding",
+    "we have decided to move forward with other", "pursue other applicants",
+    "another candidate", "more qualified candidates",
+    "position has been filled", "role has been filled", "position filled",
+    "position is closed", "requisition closed", "no longer considering",
+    "application unsuccessful"
+  ];
+  if (hasAny(t, REJECT_TERMS)) return logStatus("Rejected", "REJECT_TERMS");
+
+  // --- 2) TO DO (forms, portals, set up accounts, assessments, etc.) ---
+  // Prioritize To Do over Interview to avoid “Next step: complete profile” false hits
+  const TODO_TERMS = [
+    // Account / portal / profile
+    "create a profile", "create your profile", "candidate profile",
+    "candidate zone", "talent portal", "candidate portal", "login to your account",
+    "log in to your account", "sign in to your account", "set a password",
+    "set your password", "reset your password", "activate your account",
+    "update your profile", "update profile",
+    // Complete application items
+    "complete your application", "complete the application",
+    "finish your application", "finish application", "action needed",
+    "additional information required", "additional details required",
+    "assigned to your file", "please complete", "please finalize",
+    "outstanding items", "incomplete application",
+    // Compliance / self-ID
+    "self identification", "self-identification", "voluntary self identification",
+    "eeo form", "eeo survey", "disability self identification",
+    // Assessments / tests / scheduling links for tasks (not interviews)
+    "assessment", "skills test", "aptitude test", "questionnaire",
+    "coding challenge", "hackerrank", "codility",
+    // Document requests
+    "upload your resume", "upload documents", "provide references",
+    "background check authorization", "consent form"
+  ];
+  if (hasAny(t, TODO_TERMS)) return logStatus("To Do", "TODO_TERMS");
+
+  // --- 3) INTERVIEW (phone screens, recruiter chats, scheduling)
+  // Note: Put this AFTER To Do to avoid "Next step: complete X" mislabels
+  const INTERVIEW_TERMS = [
+    "interview", "phone screen", "screening call",
+    "chat with", "speak with", "conversation with", "meet with",
+    "schedule a call", "schedule time", "book a time", "book time",
+    "calendar link", "calendly", "find time to connect",
+    "availability to talk", "your availability",
+    "next step will be an interview", "next steps will be an interview",
+    "move to interview", "invite to interview", "interview invitation"
+  ];
+  if (hasAny(t, INTERVIEW_TERMS)) return logStatus("Interview", "INTERVIEW_TERMS");
+
+  // --- 4) SUBMITTED (confirmation / acknowledgment)
+  const SUBMITTED_TERMS = [
+    "thank you for applying", "thanks for applying", "we have received your application",
+    "your application has been received", "application received", "application submitted",
+    "we received your application", "acknowledgement", "confirmation of your application",
+    "has been submitted"
+  ];
+  if (hasAny(t, SUBMITTED_TERMS)) return logStatus("Submitted", "SUBMITTED_TERMS");
+
+  // Default
+  return logStatus("Submitted", "DEFAULT");
+}
+
+// Back-compat alias so you don’t have to touch older calls:
+function getStatusFromSnippet(s) {
+  return getStatusFromText(s);
+}
+
+// Tiny helpers
+function hasAny(text, terms) {
+  for (var i = 0; i < terms.length; i++) {
+    if (text.indexOf(terms[i]) !== -1) return true;
+  }
+  return false;
+}
+
+function logStatus(status, bucket) {
+  if (LOG_STATUS_DEBUG) Logger.log("🧭 Status=" + status + " via " + bucket);
+  return status;
+}
+
+function getSpamFlag(from, subject, body) {
+  from = (from || "").toLowerCase();
+  subject = subject || "";
+  body = body || "";
+
+  // Domains/senders that should be skipped
+  const spammySources = [
+    "glassdoor.com", "alerts@ziprecruiter.com", "ziprecruiter.com",
+    "adzuna.com", "theladders.com", "bounce.recruiter.com",
+    "workopolis.com", "careerbuilder.com", "jobcase.com", "monster.com",
+    "workablemail.com", "do-not-reply@ziprecruiter.com",
+    "email.ourcareerplace.com", "message.get.it", "higherhireemail.com",
+    "uopeople.edu" // University of the People (per Donna)
+  ];
+  if (spammySources.some(s => from.includes(s))) {
+    return "Spammy sender domain";
+  }
+
+  const lowerSubj = subject.toLowerCase();
+  const lowerBody = body.toLowerCase();
+
+  // Subject triggers
+  const subjectTriggers = [
+    "check out new opportunities at",
+    "urgent hiring",
+    "hot openings",
+    "immediate openings",
+    "work from home job offer",
+    "find your next job",
+    "donotreply@jobspresso",
+    "newsletter",
+    "unlock new doors"
+  ];
+  if (subjectTriggers.some(t => lowerSubj.includes(t))) {
+    return "Spammy subject";
+  }
+
+  // Body triggers (lightweight)
+  const bodyTriggers = [
+    "new jobs for you",
+    "top picks for you",
+    "job matches for you",
+    "see jobs now",
+    "recommended jobs",
+    "daily job alerts",
+    "weekly job"
+  ];
+  if (bodyTriggers.some(t => lowerBody.includes(t))) {
+    return "Marketing blast (body)";
+  }
+
+  return null; // Not spammy
+}
+
+function logAndRecordSpam(spamSheet, msg, subject, body, from, url, reason) {
+  console.log(`⚠️ Skipped spam: ${from} — ${reason}`);
+  spamSheet.appendRow([
+    msg.getDate(), "", "", `Skipped - ${reason}`, subject, body, from, url
+  ]);
+}
 
 /**
  * Scans the sheet for rows with "???" as Job Title and backfills them using Subject/Snippet.
@@ -272,6 +457,7 @@ function backfillMissingTitles() {
   const colTitle = headers.indexOf("Job Title");          // ✅ Update based on your actual header
   const colSubject = headers.indexOf("Subject");
   const colSnippet = headers.indexOf("Snippet");   // ✅ Might be "Snippet" or something else
+const colBody = headers.indexOf("Body");
 
   if (colTitle === -1 || colSubject === -1 || colSnippet === -1) {
     Logger.log("❌ Required columns not found. Check column names.");
@@ -286,7 +472,8 @@ function backfillMissingTitles() {
     if (!existingTitle || existingTitle === "???") {
       const subject = row[colSubject] || "";
       const snippet = row[colSnippet] || "";
-      const inferredTitle = extractJobTitle(subject, snippet);
+      const body = row[colBody] || "";
+      const inferredTitle = extractJobTitle(subject, body);
 
       if (inferredTitle && inferredTitle !== "???") {
         updates.push({ rowIndex: i + 1, title: inferredTitle });
