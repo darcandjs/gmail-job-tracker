@@ -1,20 +1,108 @@
+function fetchJune2025() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Output sheet (create if missing) + headers
+  const outName = "June 2025 Tracker";
+  const sheet = ss.getSheetByName(outName) || ss.insertSheet(outName);
+  const headers = ["Date", "Title", "Company", "Status", "Subject", "Body", "From", "URL"];
+  if (sheet.getLastRow() === 0) sheet.appendRow(headers);
+
+  // Spammy sheet (create if missing)
+  const spamSheet = ss.getSheetByName("Spammy") || ss.insertSheet("Spammy");
+  if (spamSheet.getLastRow() === 0) spamSheet.appendRow(headers);
+
+  // Existing URLs to avoid dupes (URL is column 8 -> index 7)
+  const existing = new Set();
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const url = data[i][7];
+    if (url) existing.add(String(url).trim());
+  }
+
+  // Gmail query: only June 2025
+  const query = 'label:_____JOBAPPS_____ after:2025/05/31 before:2025/07/01';
+  const threads = GmailApp.search(query);
+  Logger.log(`🔎 Found ${threads.length} threads for June 2025`);
+
+  for (const thread of threads) {
+    // You already have this helper; it returns { firstMsg, from, subject, body, threadUrl }
+    const { firstMsg, from, subject, body, threadUrl } = extractMessageDetails(thread);
+
+    if (existing.has(threadUrl)) {
+      Logger.log(`↩️  Skipping duplicate: ${threadUrl}`);
+      continue;
+    }
+
+    // One spam gate; logs reason to Spammy
+    const reason = (typeof getSpamFlag === "function") ? getSpamFlag(from, subject, body) : null;
+    if (reason) {
+      if (typeof logAndRecordSpam === "function") {
+        logAndRecordSpam(spamSheet, firstMsg, subject, body, from, threadUrl, reason);
+      } else {
+        spamSheet.appendRow([firstMsg.getDate(), "", "", `Skipped - ${reason}`, subject, body, from, threadUrl]);
+      }
+      continue;
+    }
+
+    // Parse via your router (must accept from, subject, body)
+    const result = processEmail(from, subject, body);
+    if (!result) {
+      Logger.log("⚠️ processEmail returned null — skipping.");
+      continue;
+    }
+
+    const { title, company, status } = result;
+    sheet.appendRow([
+      firstMsg.getDate(),
+      title || "",
+      company || "",
+      status || "Submitted",
+      subject,
+      body,   // <-- full cleaned body
+      from,
+      threadUrl
+    ]);
+    Logger.log(`✅ Added: ${title || "???"} @ ${company || "???"}`);
+  }
+
+  Logger.log("🎉 Done importing June 2025.");
+}
+
+
 // fetch.gs — CLEANED & MODULARIZED 🧼
 
 function fetchFromLabel() {
   const { sheet, spamSheet } = getSheets();
   if (!sheet || !spamSheet) return;
 
+  // Column index for URL (0-based index 7 with the header order above)
   const existingUrls = getExistingUrls(sheet, 7);
-  const threads = getRecentLabeledThreads("_____JOBAPPS_____", 3); // last 3 days only
+
+  // Last 3 days (your current setting)
+  //const threads = getRecentLabeledThreads("_____JOBAPPS_____", 3);
+const threads = GmailApp.search('label:_____JOBAPPS_____ after:2025/05/31 before:2025/07/01');
+//const juneSheet = ss.getSheetByName('June 2025 Tracker') || ss.insertSheet('June 2025 Tracker');
+
+
 
   for (const thread of threads) {
     const { firstMsg, from, subject, body, threadUrl } = extractMessageDetails(thread);
-    if (isSpammySource(from)) {
-      logAndRecordSpam(spamSheet, firstMsg, subject, body, from, threadUrl);
+
+    if (existingUrls.has(threadUrl)) {
+      console.log(`Skipping duplicate thread: ${threadUrl}`);
+      continue;
+    }
+
+    // ✅ One gate for spam; logs to Spammy with reason
+    const reason = getSpamFlag(from, subject, body);
+    if (reason) {
+      logAndRecordSpam(spamSheet, firstMsg, subject, body, from, threadUrl, reason);
       continue;
     }
 
     console.log(`Processing: FROM=${from}, SUBJECT=${subject}`);
+
+    // ✅ IMPORTANT: pass body (not snippet)
     const result = processEmail(from, subject, body);
     if (!result) {
       console.log("⚠️ processEmail returned null — skipping.");
@@ -24,10 +112,22 @@ function fetchFromLabel() {
     const { title, company, status } = result;
     if (!title && !company) continue;
 
-    sheet.appendRow([firstMsg.getDate(), title || "", company || "", status || "Submitted", subject, body, from, threadUrl]);
+    // ✅ Append in the exact column order that matches your sheet
+    sheet.appendRow([
+      firstMsg.getDate(),
+      title || "",
+      company || "",
+      status || "Submitted",
+      subject,
+      body,       // <-- make sure this is column 6 in your sheet
+      from,
+      threadUrl
+    ]);
+
     console.log(`✅ Added new row: ${title} at ${company}`);
   }
 }
+
 
 
 function fetch4Weeks() {
