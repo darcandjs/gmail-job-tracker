@@ -1,12 +1,16 @@
-function processEmail(from, subject, snippet) {
+function processEmail(from, subject, body) {
+  // Null-safety
+  from = from || "";
+  subject = subject || "";
+  body = body || "";
+
+  // --- Spam guards (subject/body aware) ---
   const spammySources = [
     "glassdoor.com", "alerts@ziprecruiter.com", "ziprecruiter.com",
     "indeed.com", "adzuna.com", "theladders.com", "bounce.recruiter.com",
     "workopolis.com", "careerbuilder.com", "jobcase.com", "monster.com",
     "workablemail.com", "do-not-reply@ziprecruiter.com",
-    "email.ourcareerplace.com",
-    "job-alert", "daily digest", "recommended jobs",
-    "check out these jobs", "we found jobs for you"
+    "email.ourcareerplace.com"
   ];
 
   const spammyPatterns = [
@@ -22,104 +26,126 @@ function processEmail(from, subject, snippet) {
   ];
 
   const cleanFrom = from.toLowerCase();
-  const cleanText = (subject + " " + snippet).toLowerCase();
+  const cleanText = (subject + " " + body).toLowerCase();
 
   if (
     spammySources.some(spam =>
       cleanFrom.includes(spam) || cleanText.includes(spam)
     ) ||
-    spammyPatterns.some(p => p.test(subject) || p.test(snippet))
+    spammyPatterns.some(p => p.test(subject) || p.test(body))
   ) {
     Logger.log(`⚠️ Skipping non-application email from: ${from}`);
     return null;
   }
 
+  // Skip self-sent
   const selfEmail = Session.getActiveUser().getEmail();
   const fromEmailMatch = from.match(/<(.+?)>/);
   const fromEmail = fromEmailMatch ? fromEmailMatch[1] : from.trim();
-
   if (fromEmail === selfEmail) {
     Logger.log(`⚠️ Skipping self-sent email: ${from}`);
     return null;
   }
 
-  // === Handler logic ===
-  if (from.includes("linkedin.com")) return handleLinkedInEmail(subject, snippet,from);
-  if (from.includes("jobhire.tech")) return handleJobHireEmail(subject, snippet,from);
-  if (from.includes("ashbyhq.com")) return handleAshbyEmail(subject, snippet,from);
-  if (from.includes("ziprecruiter.com")) return handleZipRecruiterEmail(subject, snippet,from);
-  if (from.includes("workday.com")) return handleWorkdayEmail(subject, snippet,from);
-  if (from.includes("lorienglobal.com")) return handleLorienEmail(subject, snippet,from);
-  if (from.includes("experis.com")) return handleExperisEmail(subject, snippet,from);
+  // === Handler routing (ALWAYS pass body) ===
+  if (from.includes("linkedin.com"))       return handleLinkedInEmail(subject, body);
+  if (from.includes("jobhire.tech"))       return handleJobHireEmail(from, subject, body);
+  if (from.includes("ashbyhq.com"))        return handleAshbyEmail(subject, body);
+  if (from.includes("ziprecruiter.com"))   return handleZipRecruiterEmail(subject, body);
+  if (from.includes("workday.com"))        return handleWorkdayEmail(subject, body);
+  if (from.includes("lorienglobal.com"))   return handleLorienEmail(subject, body);
+  if (from.includes("experis.com"))        return handleExperisEmail ? handleExperisEmail(subject, body) : genericFallback(from, subject, body);
 
   // Fallback
+  return genericFallback(from, subject, body);
+}
+
+// ---- Generic Fallback ----
+function genericFallback(from, subject, body) {
   return {
-    title: extractJobTitle(subject, snippet,from),
-    company: extractCompanyName(from, subject, snippet),
+    title: extractJobTitle(subject, body),
+    company: extractCompanyName(from, subject, body),
+    status: (typeof getStatusFromText === "function")
+      ? getStatusFromText(subject + " " + body)
+      : determineStatus((subject + " " + body).toLowerCase())
   };
 }
 
+// --- Generic Extractors (subject/body first; from only for company) ---
+function extractJobTitle(subject, body) {
+  subject = subject || "";
+  body = body || "";
 
-// --- Generic Extractors ---
-function extractJobTitle(subject, snippet,from) {
   const patterns = [
     /application for (.*?) at/i,
     /for the (.*?) position at/i,
     /for (.*?) role at/i,
-    /applied to (.*?) at/i, 
-    /application: (.*?)$/i,
-    /title[:\-] (.*?)(?: at|\n|$)/i,
+    /applied to (.*?) at/i,
+    /application(?: received| submitted) for (.*?) position/i,
+    /thank you for applying (?:to|for) the? (.*?) position/i,
+    /title[:\-]\s*(.*?)(?: at|\n|$)/i,
+    /application update for (.+?) role/i
   ];
 
   for (const pattern of patterns) {
-    const match = subject.match(pattern) || snippet.match(pattern);
+    const match = subject.match(pattern) || body.match(pattern);
     if (match && match[1]) {
       return cleanExtractedText(match[1]);
-    } 
+    }
+  }
+  // Last-ditch: if subject looks like a title on its own
+  if (!/^re:|^fwd:|thank you|application|applied|received/i.test(subject)) {
+    return cleanExtractedText(subject);
   }
   return "???";
 }
 
-function extractCompanyName(from, subject, snippet) {
+
+function extractCompanyName(from, subject, body) {
   from = from || "";
   subject = subject || "";
-  snippet = snippet || "";
+  body = body || "";
 
+  // Prefer display name when it's not a generic sender
   const cleanFrom = from.replace(/<.*?>/, "").trim();
-
-  const generic = ["no reply", "careers", "recruiting", "jobs", "hiring"];
-  if (!generic.some(g => cleanFrom.toLowerCase().includes(g))) {
+  const generics = ["no reply", "no-reply", "robot", "careers", "recruiting", "jobs", "hiring"];
+  if (cleanFrom && !generics.some(g => cleanFrom.toLowerCase().includes(g))) {
     return cleanCompanyName(cleanFrom);
   }
 
+  // Try subject/body patterns
   const patterns = [
-    /at ([\w &\-\.]+)/i,
-    /with ([\w &\-\.]+)/i,
-    /application to ([\w &\-\.]+)/i,
-    /position at ([\w &\-\.]+)/i,
-    /@([\w\-]+)\./i
+    /at ([\w &\-.]+)/i,
+    /with ([\w &\-.]+)/i,
+    /application to ([\w &\-.]+)/i,
+    /position at ([\w &\-.]+)/i
   ];
-
   for (const pattern of patterns) {
-    const match =
-      subject.match(pattern) || snippet.match(pattern) || from.match(pattern);
-    if (match && match[1]) {
-      return cleanCompanyName(match[1]);
-    }
+    const m = subject.match(pattern) || body.match(pattern);
+    if (m && m[1]) return cleanCompanyName(m[1]);
+  }
+
+  // Domain fallback
+  const domainMatch = from.match(/@([a-z0-9\.-]+)/i);
+  if (domainMatch) {
+    let domain = domainMatch[1].toLowerCase();
+    domain = domain.replace(/\.(com|org|net|ai|co|io)$/i, "");
+    return cleanCompanyName(domain);
   }
 
   return "???";
 }
 
-// --- Determine Status ---
+// --- Legacy/simple status (kept for fallback only) ---
 function detectStatus(text) {
+  text = (text || "").toLowerCase();
   if (text.includes("we're excited to move forward") || text.includes("interview")) return "Interview";
   if (text.includes("we will not be moving forward") || text.includes("decided not to")) return "Rejected";
   return "Submitted";
 }
-// --- Status Determination ---
+
 function determineStatus(text) {
-  const lower = text.toLowerCase();
+  const lower = (text || "").toLowerCase();
 
   if (lower.includes("we have decided to pursue other applicants") ||
       lower.includes("not moving forward") ||
@@ -149,5 +175,5 @@ function determineStatus(text) {
     return "Submitted";
   }
 
-  return "Submitted"; // default fallback
+  return "Submitted";
 }
