@@ -1,38 +1,209 @@
-// === HANDLERS: Individual Email Parsing Logic ===
+/**
+ * Specialized email handlers for different job platforms
+ * @file Contains parsers for specific email formats from job platforms
+ */
 
-function extractMessageDetails(thread) {
-  const firstMsg = thread.getMessages()[0];
-  const from = firstMsg.getFrom();
-  const subject = firstMsg.getSubject();
-  const threadUrl = `https://mail.google.com/mail/u/0/#inbox/${thread.getId()}`;
+/**
+ * Specialized handler for recruiter emails (Sparks Group, LaSalle, etc.)
+ */
+function handleRecruiterEmail(from, subject, body) {
+  const cleanBody = body
+    .replace(/&nbsp;|\u00A0/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  // Clean and truncate the email body
-  const rawBody = firstMsg.getBody();
-  const body = cleanEmailBody(rawBody);
+  // Sparks Group pattern
+  const sparksMatch = cleanBody.match(/applying to (.+?) with (.+?) via/i);
+  if (sparksMatch) return {
+    title: cleanExtractedText(sparksMatch[1]),
+    company: cleanCompanyName(sparksMatch[2]),
+    status: getStatusFromText(cleanBody)
+  };
 
+  // Happy Cog pattern
+  if (from.includes('happycog')) return {
+    title: extractJobTitle(subject, cleanBody),
+    company: "Happy Cog",
+    status: "Submitted"
+  };
+
+  // LaSalle Network pattern
+  const laSalleMatch = cleanBody.match(/interest in the (.+?) role/i);
+  if (from.includes('lasallenetwork')) return {
+    title: laSalleMatch ? cleanExtractedText(laSalleMatch[1]) : extractJobTitle(subject, cleanBody),
+    company: "LaSalle Network",
+    status: "To Do"
+  };
+
+  // Generic recruiter fallback
   return {
-    firstMsg,
-    from,
-    subject,
-    body,
-    threadUrl
+    title: extractJobTitle(subject, cleanBody),
+    company: extractCompanyName(from, subject, cleanBody),
+    status: getStatusFromText(cleanBody)
   };
 }
 
-function cleanEmailBody(html) {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<[^>]+>/g, "") // Strip all HTML tags
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 2000); // Truncate to 2000 chars
+
+
+/**
+ * Enhanced LinkedIn email handler
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body
+ * @return {Object} Contains title and company
+ */
+function handleLinkedInEmail(subject, body) {
+  // Clean body by removing hidden characters and HTML entities
+  const cleanBody = body.replace(/&[a-z]+;|͏|\u200B/g, ' ').replace(/\s+/g, ' ').trim();
+  
+  // Pattern 1: "Your application was sent to [Company] [Title]"
+  const applicationPattern = /Your application was sent to (.+?) (.+?) Insight Global/i;
+  let match = cleanBody.match(applicationPattern);
+  
+  if (match && match.length >= 3) {
+    return {
+      title: cleanExtractedText(match[2]),
+      company: cleanCompanyName(match[1])
+    };
+  }
+  
+  // Pattern 2: Multi-line format (original approach)
+  const lines = cleanBody.split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0);
+  
+  if (lines.length >= 3) {
+    // Look for job title in common positions
+    const titlePatterns = [
+      /Scrum Master/i,
+      /Product Owner/i,
+      /Software Engineer/i,
+      /Project Manager/i
+    ];
+    
+    let foundTitle = lines.find(line => 
+      titlePatterns.some(pattern => pattern.test(line))
+    );
+    
+    return {
+      title: foundTitle ? cleanExtractedText(foundTitle) : extractJobTitle(subject, cleanBody),
+      company: cleanCompanyName(lines[1] || extractCompanyName("linkedin.com", subject, cleanBody))
+    };
+  }
+  
+  // Fallback to generic extraction
+  return {
+    title: extractJobTitle(subject, cleanBody),
+    company: extractCompanyName("linkedin.com", subject, cleanBody)
+  };
+}
+
+/**
+ * Enhanced cleaning for LinkedIn-specific formats
+ */
+function cleanExtractedText(text) {
+  if (!text) return "???";
+  
+  // Remove location info and other metadata
+  text = text
+    .replace(/&middot;.*$/, '') // Remove everything after location marker
+    .replace(/\(.*?\)/g, '') // Remove parentheses
+    .replace(/ at .*$/, '') // Remove "at company" suffixes
+    .replace(/[^a-zA-Z0-9 &\-]/g, ' ') // Remove special chars
+    .replace(/\s+/g, ' ') // Collapse whitespace
+    .trim();
+    
+  return text || "???";
+}
+
+/**
+ * Handles JobHire/Ashby application emails
+ * @param {string} from - Sender email
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body
+ * @return {Object} Contains title, company and status
+ */
+/**
+ * Enhanced JobHire.Tech email handler
+ * @param {string} from - Sender email
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body
+ * @return {Object} Contains title, company, and status
+ */
+/**
+ * Handles JobHire.Tech forwarded applications
+ */
+function handleJobHireEmail(from, subject, body) {
+  const cleanBody = body
+    .replace(/\[reply to email .*?\]/g, '')
+    .replace(/&nbsp;|\u00A0/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  // Extract from "Thank you for applying to [Title] at [Company]"
+  const appMatch = cleanBody.match(/applying to (.+?) at (.+?)(?:\.|\n|$)/i);
+  if (appMatch) return {
+    title: cleanExtractedText(appMatch[1]),
+    company: cleanCompanyName(appMatch[2]),
+    status: getStatusFromText(cleanBody)
+  };
+
+  return genericFallback(from, subject, body);
 }
 
 
 
+
+/**
+ * Handles AshbyHQ application emails
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body
+ * @return {Object} Contains title and company
+ */
+function handleAshbyEmail(subject, body) {
+  const match = body.match(/apply(?:ing)? to.*?[:\-]?\s*(.*?)\./i);
+  return {
+    title: cleanExtractedText(match?.[1] || subject.split("|")[1]),
+    company: cleanCompanyName(subject.split("|")[0].trim())
+  };
+}
+
+/**
+ * Handles Workday application emails
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body
+ * @return {Object} Contains title and company
+ */
+function handleWorkdayEmail(subject, body) {
+  const patterns = [
+    /interest in the (.+?) position at (.+?)(?:\.|\n|$)/i,
+    /Thank you for applying to (.+?) at (.+?)(?:\.|\n|$)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = body.match(pattern);
+    if (match) {
+      return {
+        title: cleanExtractedText(match[1]),
+        company: cleanCompanyName(match[2])
+      };
+    }
+  }
+
+  return {
+    title: extractJobTitle(subject, body),
+    company: extractCompanyName("workday.com", subject, body)
+  };
+}
+
+/**
+ * Handles Lorien application emails
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body
+ * @return {Object} Contains title and company
+ */
 function handleLorienEmail(subject, body) {
-  const match = snippet.match(/Thank you for applying to (.+?) through Lorien/i);
+  const match = body.match(/Thank you for applying to (.+?) through Lorien/i);
   if (match) {
     return {
       title: cleanExtractedText(match[1]),
@@ -40,158 +211,50 @@ function handleLorienEmail(subject, body) {
     };
   }
 
-  const altMatch = snippet.match(/interest in the (.+?) role.*? at (.+?)(\.|\n|$)/i);
-  if (altMatch) {
-    return {
-      title: cleanExtractedText(altMatch[1]),
-      company: cleanCompanyName(altMatch[2])
-    };
-  }
-
   return {
-    title: extractJobTitle(subject, snippet),
+    title: extractJobTitle(subject, body),
     company: "Lorien"
   };
 }
 
-function handleLinkedInEmail(subject, body) {
-  const lines = snippet.split("\n").map(l => l.trim()).filter(Boolean);
-  const title = cleanExtractedText(lines[1]);
-  const company = cleanCompanyName(lines[2]);
-  return { title, company };
-}
-
+/**
+ * Handles ZipRecruiter application emails
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body
+ * @return {Object} Contains title and company
+ */
 function handleZipRecruiterEmail(subject, body) {
-  const match = snippet.match(/applied to (.+?) at (.+?)(\.|\s|$)/i);
+  const match = body.match(/applied to (.+?) at (.+?)(\.|\s|$)/i);
   if (match) {
     return {
       title: cleanExtractedText(match[1]),
       company: cleanCompanyName(match[2])
     };
   }
+
   return {
-    title: extractJobTitle(subject, snippet),
+    title: extractJobTitle(subject, body),
     company: "ZipRecruiter"
   };
 }
 
-function handleAshbyEmail(subject, body) {
-  const match = snippet.match(/apply(?:ing)? to.*?[:\-]?\s*(.*?)\./i);
-  const title = cleanExtractedText(match?.[1] || subject.split("|")[1]);
-  const company = cleanCompanyName(subject.split("|")[0].trim());
-  return { title, company };
-}
-
-function handleWorkdayEmail(subject, body) {
-  const match = snippet.match(/interest in the (.+?) position at (.+?)(?:\.|\n|$)/i);
+/**
+ * Handles Experis application emails
+ * @param {string} subject - Email subject
+ * @param {string} body - Email body
+ * @return {Object} Contains title and company
+ */
+function handleExperisEmail(subject, body) {
+  const match = body.match(/application for (.+?) through Experis/i);
   if (match) {
     return {
       title: cleanExtractedText(match[1]),
-      company: cleanCompanyName(match[2])
+      company: "Experis"
     };
   }
-  const altMatch = snippet.match(/Thank you for applying to (.+?) at (.+?)(?:\.|\n|$)/i);
-  if (altMatch) {
-    return {
-      title: cleanExtractedText(altMatch[1]),
-      company: cleanCompanyName(altMatch[2])
-    };
-  }
-  return {
-    title: extractJobTitle(subject, snippet),
-    company: extractCompanyName("workday", subject, snippet)
-  };
-}
-
-function handleJobHireEmail(from, subject, body) {
-  Logger.log("📩 Starting handleJobHireEmail");
-
-  subject = subject.replace(/\[reply to email .*?\]\s*/i, '').trim();
-  Logger.log("🔍 Cleaned subject: " + subject);
-
-  const replyMatch = body.match(/\[reply to email (.+?)\]/i);
-  const replyEmail = replyMatch ? replyMatch[1] : undefined;
-  Logger.log("📧 replyEmail: " + replyEmail);
-
-  let extractedCompany = replyEmail ? cleanCompanyName(replyEmail.split("@")[1]) : null;
-  Logger.log("🏢 extractedCompany from replyEmail: " + extractedCompany);
-
-  // Fallback to display name if replyEmail fails
-  if (!extractedCompany && from.includes("<") && from.includes(">")) {
-    const displayName = from.split("<")[0].trim();
-    if (displayName && displayName.length > 2) {
-      extractedCompany = cleanCompanyName(displayName);
-      Logger.log("🏷️ extractedCompany from display name: " + extractedCompany);
-    }
-  }
-
-  const patterns = [
-    { pattern: /application update for (.+?) role with (.+?)(?:\.|\s|$)/i, label: '🔁 Matched: update for ___ role with ___' },
-    { pattern: /applied to (.+?) with (.+?)(?:\.|\s|$)/i, label: '🔁 Matched: applied to ___ with ___' },
-    { pattern: /apply for (.+?) position at (.+?)(?:\.|\s|$)/i, label: '🔁 Matched: apply for ___ position at ___' },
-    { pattern: /interest in the (.+?) position with (.+?)(?:\.|\s|$)/i, label: '🔁 Matched: interest in ___ position with ___' },
-    { pattern: /application to (.+?) position with (.+?)(?:\.|\s|$)/i, label: '🔁 Matched: application to ___ position with ___' },
-    { pattern: /interest in the (.+?) position at (.+?)(?:\.|\s|$)/i, label: '🔁 Matched: interest in ___ position at ___' },
-    { pattern: /for (?:the )?(.+?) (?:position|role) at (.+?)(?:\.|\s|$)/i, label: '🔁 Matched: ___ position|role at ___' },
-    { pattern: /pursue other applicants for the (.+?) position/i, label: '🔁 Matched: pursue other applicants for ___ position' },
-    { pattern: /apply for (.+?) at (.+?)(?:\.|\s|$)/i, label: '🔁 Matched: apply for ___ at ___' },
-    { pattern: /thank you for applying for the (.+?) position.*[-–] (.+)/i, label: '🔁 Matched: thank you for applying for ___ position – ___' },
-    { pattern: /thank you for applying for (.+?) position - (.+?)( Careers)?/i, label: '🔁 Matched: thank you for applying for ___ position - ___ Careers' }
-  ];
-
-  for (const { pattern, label } of patterns) {
-    const match = body.match(pattern);
-    Logger.log(`${label} => Match: ${!!match}`);
-    if (match) {
-      return {
-        title: cleanExtractedText(match[1]),
-        company: match[2] ? cleanCompanyName(match[2]) : extractedCompany,
-        status: getStatusFromSnippet(body)
-      };
-    }
-  }
-
-  Logger.log("⚠️ No patterns matched. Falling back.");
-
-  const fallbackMatch = subject.match(/Application Update for (.+?) role/i);
-  if (fallbackMatch) {
-    Logger.log("📍 Fallback subject title match: " + fallbackMatch[1]);
-    return {
-      title: cleanExtractedText(fallbackMatch[1]),
-      company: extractedCompany || extractCompanyName("jobhire.tech", subject, body),
-      status: getStatusFromSnippet(body)
-    };
-  }
-
-  // To Do pattern detection (e.g., Self Identify, EEO)
-  if (/self.?identification|eeo form|voluntary self-identification|create a profile|complete (your|the)? application|action needed|assigned to your file|log.?in to.*(candidate zone|account)|update your profile/i.test(subject + body)) {
-    return {
-      title: extractJobTitle(subject, body),
-      company: extractedCompany || extractCompanyName("jobhire.tech", subject, body),
-      status: "To Do"
-    };
-  }
-
-  const emailBasedTitle = subject.match(/thank you for applying for (.+?) position/i)?.[1] || extractJobTitle(subject, body);
 
   return {
-    title: cleanExtractedText(emailBasedTitle),
-    company: extractedCompany || extractCompanyName("jobhire.tech", subject, body),
-    status: getStatusFromSnippet(body)
+    title: extractJobTitle(subject, body),
+    company: "Experis"
   };
-}
-
-function isSpammySubject(subject) {
-  const lower = subject.toLowerCase();
-  return (
-    lower.includes("check out new opportunities at") ||
-    lower.includes("urgent hiring") ||
-    lower.includes("hot openings") ||
-    lower.includes("immediate openings") ||
-    lower.includes("work from home job offer") ||
-    lower.includes("find your next job") ||
-    lower.includes("donotreply@jobspresso") ||
-    lower.includes("newsletter") ||
-    lower.includes("unlock new doors")
-  );
 }

@@ -6,20 +6,25 @@
 // --- Utility: Clean Company Name ---
 function cleanCompanyName(name) {
   if (!name) return "???";
-  name = name.replace(/[^a-zA-Z0-9 &\\-]/g, "").replace(/\s+/g, ' ').trim();
-
-  if (name.startsWith("reply to email")) {
-    const parts = name.split(" ");
-    for (let i = 3; i < parts.length; i++) {
-      if (!parts[i].includes("@") && parts[i] !== "com") {
-        return cleanCompanyName(parts.slice(i).join(" "));
-      }
-    }
-  }
-
-  name = name.replace(/\.?com$/i, "").trim();
-  name = name.replace(/([a-z])([A-Z])/g, '$1 $2');
-  return name;
+  
+  // Remove common prefixes/suffixes
+  name = name
+    .replace(/^the\s+/i, '')
+    .replace(/^no reply\W*/i, '')
+    .replace(/^do.?not.?reply\W*/i, '')
+    .replace(/\s*(llc|inc|corp|co|lp|group|holding|solutions)\.?$/i, '')
+    .replace(/[^a-zA-Z0-9 &,\-]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+    
+  // Extract from parentheses if present (e.g., "WWT (World Wide Technology)")
+  const parenMatch = name.match(/\((.*?)\)/);
+  if (parenMatch) name = parenMatch[1];
+  
+  // Capitalize properly
+  name = name.toLowerCase().replace(/\b([a-z])/g, (_, l) => l.toUpperCase());
+    
+  return name || "???";
 }
 
 // --- Utility: Clean Extracted Job Title ---
@@ -40,63 +45,36 @@ function cleanExtractedText(text) {
  * @param {string} snippet - A snippet or excerpt of the email body.
  * @return {string} The extracted job title, or "???" if not found.
  */
-function extractJobTitle(subject, snippet) {
-  let jobTitle = "";
-  if (!snippet) snippet = "";
-  if (!subject) subject = "";
-  
-  // Some emails (e.g. jobhire.tech forwards) include a prefix like "[reply to email ...]".
-  // Remove such prefixes from subject for cleaner parsing:
-  let cleanSubject = subject.replace(/^\[reply to email [^\]]+\]\s*/i, "");
-  
-  // Define regex patterns for common phrases containing the job title:
+function extractJobTitle(subject, body) {
+  subject = subject || "";
+  body = body || "";
+
   const patterns = [
-    /Thank you for applying to (?:the\s*)?(.+?) position at/i,         // e.g. "Thank you for applying to the Software Engineer position at Company"
-    /Thank you for applying for the (.+?) position/i,                  // e.g. "Thank you for applying for the Data Scientist position"
-    /Thank you for your interest in the (.+?) position/i,              // e.g. "interest in the Product Manager position"
-    /We have received your application for the (.+?) position/i,       // e.g. "received your application for the Sales Associate position"
-    /application for the position of (.+?)\b/i,                        // e.g. "application for the position of Software Engineer"
-    /applying for our (.+?) opening/i,                                 // e.g. "applying for our Senior Analyst opening"
-    /for the (.+?) role\b/i,                                           // e.g. "applying for the Developer role" or "for the Developer role at"
-    /for the (.+?) position\b/i,                                       // e.g. "for the Technician position" (covers variations without 'at')
-    /applied for the (.+?) at/i,                                       // e.g. "You applied for the Data Engineer at Company"
-    /Your application to .* for (.+?) (?:has|was)/i                    // e.g. "Your application to Company for Software Engineer has been received"
+    /application for (.*?) at/i,
+    /for the (.*?) position at/i,
+    /for (.*?) role at/i,
+    /applied to (.*?) at/i,
+    /application(?: received| submitted) for (.*?) position/i,
+    /thank you for applying (?:to|for) the? (.*?) position/i,
+    /title[:\-]\s*(.*?)(?: at|\n|$)/i,
+    /application update for (.+?) role/i
   ];
-  
-  // Try each pattern on the email snippet text:
-  for (const regex of patterns) {
-    const match = snippet.match(regex);
-    if (match) {
-      jobTitle = match[1].trim();
-      break;
-    }
+
+  for (const pattern of patterns) {
+    const m = subject.match(pattern) || body.match(pattern);
+    if (m && m[1]) return cleanExtractedText(m[1]);
   }
-  
-  // Fallback: if not found in snippet, try patterns on the subject line as well.
-  if (!jobTitle) {
-    for (const regex of patterns) {
-      const matchSub = cleanSubject.match(regex);
-      if (matchSub) {
-        jobTitle = matchSub[1].trim();
-        break;
-      }
-    }
+
+  // Last resort: use subject as title only if it doesn't look generic
+  if (!/^re:|^fwd:|thank you|application|applied|received|confirmation/i.test(subject)) {
+    return cleanExtractedText(subject);
   }
-  
-  // Additional fallback: if subject looks like it contains the title (e.g. subject is just the job title or includes it plainly).
-  if (!jobTitle) {
-    // If the clean subject is not a reply/forward and not a generic confirmation, assume it might be the job title.
-    if (cleanSubject && !/^re:|^fwd:|thank you|application|applied/i.test(cleanSubject)) {
-      // Use the subject as title (for cases where subject is literally the job title or includes it).
-      jobTitle = cleanSubject;
-    }
-  }
-  
-  return jobTitle || "???";
+  return "???";
 }
 
 
-function extractCompanyName(from, subject, snippet) {
+
+function extractCompanyName(from, subject, body) {
   const email = from.match(/<(.+?)>/)?.[1] || from;
   const cleanFrom = email.split("@")[0];
 
@@ -109,7 +87,7 @@ function extractCompanyName(from, subject, snippet) {
   ];
 
   for (const pattern of patterns) {
-    const match = subject.match(pattern) || snippet.match(pattern) || from.match(pattern);
+    const match = subject.match(pattern) || body.match(pattern) || from.match(pattern);
     if (match && match[1]) {
       return cleanCompanyName(match[1]);
     }
@@ -117,37 +95,52 @@ function extractCompanyName(from, subject, snippet) {
 
   return cleanCompanyName(cleanFrom);
 }
-function processEmail(from, subject, snippet) {
-  from = from.toLowerCase();
-  const text = (subject + " " + snippet).toLowerCase();
+function processEmail(from, subject, body) {
+  // Null-safety
+  from = from || "";
+  subject = subject || "";
+  body = body || "";
 
-  const spammySources = [
-    "glassdoor.com", 
-    "alerts@ziprecruiter.com", 
-    "ziprecruiter.com",
-    "indeed.com",
-    "jobcase.com",
-    "monster.com"
-  ];
-
-  if (spammySources.some(spam => from.includes(spam))) {
-    Logger.log(`⚠️ Skipping non-application email from: ${from}`);
+  // Skip self-sent (keep this here)
+  const selfEmail = Session.getActiveUser().getEmail();
+  const fromEmailMatch = from.match(/<(.+?)>/);
+  const fromEmail = fromEmailMatch ? fromEmailMatch[1] : from.trim();
+  if (fromEmail === selfEmail) {
+    Logger.log(`⚠️ Skipping self-sent email: ${from}`);
     return null;
   }
 
-  if (from.includes("linkedin.com")) return handleLinkedInEmail(subject, snippet);
-  if (from.includes("jobhire.tech")) return handleJobHireEmail(subject, snippet);
-  if (from.includes("ashbyhq.com")) return handleAshbyEmail(subject, snippet);
-  if (from.includes("ziprecruiter.com")) return handleZipRecruiterEmail(subject, snippet);
-  if (from.includes("workday.com")) return handleWorkdayEmail(subject, snippet);
-  if (from.includes("lorienglobal.com")) return handleLorienEmail(subject, snippet);
-  if (from.includes("experis.com")) return handleExperisEmail(subject, snippet);
+  // === Handler routing (ALWAYS pass body) ===
+  if (from.includes("linkedin.com"))       return handleLinkedInEmail(subject, body);
+  if (from.includes("jobhire.tech"))       return handleJobHireEmail(from, subject, body);
+  if (from.includes("ashbyhq.com"))        return handleAshbyEmail(subject, body);
+  if (from.includes("ziprecruiter.com"))   return handleZipRecruiterEmail(subject, body);
+  if (from.includes("workday.com"))        return handleWorkdayEmail(subject, body);
+  if (from.includes("lorienglobal.com"))   return handleLorienEmail(subject, body);
+  if (typeof handleExperisEmail === "function" && from.includes("experis.com")) {
+    return handleExperisEmail(subject, body);
+  }
 
+  // Generic fallback
   return {
-    title: extractJobTitle(subject, snippet),
-    company: extractCompanyName(from, subject, snippet),
+    title: extractJobTitle(subject, body),
+    company: extractCompanyName(from, subject, body),
+    status: getStatusFromText(subject + " " + body)
   };
 }
+
+
+// ---- Generic Fallback ----
+function genericFallback(from, subject, body) {
+  return {
+    title: extractJobTitle(subject, body),
+    company: extractCompanyName(from, subject, body),
+    status: (typeof getStatusFromText === "function")
+      ? getStatusFromText(subject + " " + body)
+      : determineStatus((subject + " " + body).toLowerCase())
+  };
+}
+
 function reclassifyAndTagEmails() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
   const data = sheet.getDataRange().getValues();
@@ -161,7 +154,7 @@ function reclassifyAndTagEmails() {
       companyCell,
       titleCell,
       statusCell,
-      snippet,
+      body,
       tagged,
       label,
       url,

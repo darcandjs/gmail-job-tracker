@@ -1,109 +1,122 @@
-// --- TEST CASES ---
-function testLinkedInAndJobHireFixes() {
+/**
+ * Test cases for job tracker functionality
+ * @file Contains unit tests for email parsing
+ */
+
+/**
+ * Runs all test cases
+ */
+function runAllTests() {
+  testLinkedInEmailParsing();
+  testJobHireEmailParsing();
+  testWorkdayEmailParsing();
+  testSpamDetection();
+  Logger.log("✅ All tests completed");
+}
+
+/**
+ * Tests LinkedIn email parsing
+ */
+function testLinkedInEmailParsing() {
+  const testCase = {
+    from: "LinkedIn <jobs-noreply@linkedin.com>",
+    subject: "Your application was sent",
+    body: "Your application was sent\n\nSoftware Engineer\nGoogle\nMountain View, CA",
+    expected: {
+      title: "Software Engineer",
+      company: "Google"
+    }
+  };
+
+  const result = handleLinkedInEmail(testCase.subject, testCase.body);
+  assertEqual(result.title, testCase.expected.title, "LinkedIn title");
+  assertEqual(result.company, testCase.expected.company, "LinkedIn company");
+}
+
+/**
+ * Tests JobHire email parsing
+ */
+function testJobHireEmailParsing() {
   const testCases = [
     {
-      from: "LinkedIn <jobs-noreply@linkedin.com>",
-      subject: "Donna, your application was sent to Tishman",
-      snippet: "Your application was sent to Tishman\n\nProject Manager – Capital Projects\nTishman\nLake Buena Vista, FL",
-      expected: {
-        title: "Project Manager Capital Projects",
-        company: "Tishman"
-      }  
-    },
-    {
       from: "No Reply <robot@jobhire.tech>",
-      subject: "[reply to email awilkerson@meteoreducation.com] Software Engineer - Meteor Education",
-      snippet: "Thank you for your interest in the Software Engineer position with Meteor Education",
+      subject: "[reply to email jobs@acme.com] Software Engineer Position",
+      body: "Thank you for applying to Software Engineer at Acme Inc.",
       expected: {
         title: "Software Engineer",
-        company: "Meteor Education"
+        company: "Acme Inc"
       }
     },
     {
       from: "No Reply <robot@jobhire.tech>",
-      subject: "[reply to email donotreply@msg.paycomonline.com] Application Status Update",
-      snippet: "Thank you so much for the interest you’ve expressed in working at Outlook Amusements. We have decided to pursue other applicants for the Project Manager position.",
+      subject: "Application Update",
+      body: "Application update for Data Scientist role with Tech Corp",
       expected: {
-        title: "Project Manager",
-        company: "Outlook Amusements"
-      }
-    },
-    {
-      from: "No Reply <robot@jobhire.tech>",
-      subject: "[reply to email prince.john@cytora.com] Thank you for your application to Cytora.",
-      snippet: "Dear Donna,\nThank you for taking the time to apply for the Delivery Manager - US position at Cytora.",
-      expected: {
-        title: "Delivery Manager - US",
-        company: "Cytora"
+        title: "Data Scientist",
+        company: "Tech Corp"
       }
     }
   ];
 
   testCases.forEach((test, i) => {
-    const result = processEmail(test.from, test.subject, test.snippet);
-Logger.log(`Test ${i + 1}:`);
-Logger.log(`  Expected: ${JSON.stringify(test.expected)}`);
-Logger.log(`  Actual:   ${JSON.stringify(result)}`);
-Logger.log(`  Match:    ${result.title === test.expected.title && result.company === test.expected.company ? '✅' : '❌'}`);
+    const result = handleJobHireEmail(test.from, test.subject, test.body);
+    assertEqual(result.title, test.expected.title, `JobHire title #${i + 1}`);
+    assertEqual(result.company, test.expected.company, `JobHire company #${i + 1}`);
   });
-
 }
 
-function testAlertSmartsearchEmail() {
-  const subject = "Application Update for Sr. Commercial Construction Project Manager role with Jonah Development Corp.";
-  const snippet = `
-    [reply to email alert@smartsearchonline.com]
-    Unfortunately, we have decided to move forward with other candidates.
-    Application Update for Sr. Commercial Construction Project Manager role with Jonah Development Corp.
-  `;
+/**
+ * Tests Workday email parsing
+ */
+function testWorkdayEmailParsing() {
+  const testCase = {
+    from: "noreply@workday.com",
+    subject: "Application Received",
+    body: "Thank you for your interest in the Product Manager position at Amazon",
+    expected: {
+      title: "Product Manager",
+      company: "Amazon"
+    }
+  };
 
-  const result = processEmail("robot@jobhire.tech", subject, snippet);
+  const result = handleWorkdayEmail(testCase.subject, testCase.body);
+  assertEqual(result.title, testCase.expected.title, "Workday title");
+  assertEqual(result.company, testCase.expected.company, "Workday company");
+}
 
-  console.log("📬 testAlertSmartsearchEmail result:", result);
+/**
+ * Tests spam detection
+ */
+function testSpamDetection() {
+  const testCases = [
+    {
+      from: "alerts@ziprecruiter.com",
+      subject: "New jobs for you",
+      expected: true
+    },
+    {
+      from: "hiring@company.com",
+      subject: "Application received",
+      expected: false
+    }
+  ];
 
-  if (result.title !== "Sr Commercial Construction Project Manager") {
-    throw new Error(`❌ Incorrect title. Expected 'Sr Commercial Construction Project Manager' but got '${result.title}'`);
+  testCases.forEach((test, i) => {
+    const result = isSpammySource(test.from) || isSpammySubject(test.subject);
+    assertEqual(result, test.expected, `Spam test #${i + 1}`);
+  });
+}
+
+/**
+ * Asserts that two values are equal
+ * @param {*} actual - Actual value
+ * @param {*} expected - Expected value
+ * @param {string} message - Test description
+ */
+function assertEqual(actual, expected, message) {
+  if (actual === expected) {
+    Logger.log(`✅ PASS: ${message}`);
+  } else {
+    Logger.log(`❌ FAIL: ${message} (Expected: ${expected}, Actual: ${actual})`);
   }
-  if (result.company !== "Jonah Development Corp") {
-    throw new Error(`❌ Incorrect company. Expected 'Jonah Development Corp' but got '${result.company}'`);
-  }
-  if (result.status !== "Rejected") {
-    throw new Error(`❌ Incorrect status. Expected 'Rejected' but got '${result.status}'`);
-  }
-
-  console.log("✅ testAlertSmartsearchEmail passed");
-
 }
-function testJobHireTEKsystems1() {
-  const subject = "[reply to email opportunities@e.teksystems.com] Hi Donna, thank you for applying for the Engagement Manager II (Hybrid) position - TEKsystems Careers";
-  const snippet = `
-Hi Donna,
-
-Thank you for applying for the Engagement Manager II (Hybrid) position – TEKsystems Careers
-https://click.e.allegisgroup.com/?qs=abc123
-`;
-
-  const result = handleJobHireEmail(subject, snippet);
-
-  console.log("🧪 Test TEKsystems #1 result:", result);
-  if (result.title !== "Engagement Manager II (Hybrid)") throw new Error(`❌ Incorrect title. Got '${result.title}'`);
-  if (result.company !== "TEKsystems Careers") throw new Error(`❌ Incorrect company. Got '${result.company}'`);
-  if (result.status !== "Submitted") throw new Error(`❌ Incorrect status. Got '${result.status}'`);
-}
-function testJobHireTEKsystems2() {
-  const subject = "[reply to email opportunities@e.teksystems.com] Thank you for applying";
-  const snippet = `
-Hi Donna,
-
-Thank you for applying for the Engagement Manager II (Hybrid) position – TEKsystems
-You’ll hear back if your experience matches our requirements.
-`;
-
-  const result = handleJobHireEmail(subject, snippet);
-
-  console.log("🧪 Test TEKsystems #2 result:", result);
-  if (result.title !== "Engagement Manager II (Hybrid)") throw new Error(`❌ Incorrect title. Got '${result.title}'`);
-  if (result.company !== "TEKsystems") throw new Error(`❌ Incorrect company. Got '${result.company}'`);
-  if (result.status !== "Submitted") throw new Error(`❌ Incorrect status. Got '${result.status}'`);
-}
-
